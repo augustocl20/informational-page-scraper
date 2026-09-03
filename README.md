@@ -6,7 +6,17 @@ Bot que extrae noticias desde feeds RSS de medios peruanos y las publica automá
 
 ## Capturas
 
-...
+<!--
+Agrega aquí 2-3 capturas reales del bot funcionando. Sugerencia de qué mostrar:
+1. El canal de Telegram con un par de noticias publicadas (foto + título, luego resumen + link).
+2. La pestaña Actions de GitHub con una corrida exitosa (círculo verde).
+3. La tabla `noticias` en Supabase con datos reales.
+
+Cómo insertarlas una vez que las tengas:
+![Bot publicando en Telegram](ruta/a/tu/captura1.png)
+![Workflow corriendo en GitHub Actions](ruta/a/tu/captura2.png)
+-->
+
 
 ## Cómo funciona
 
@@ -32,14 +42,17 @@ Bot que extrae noticias desde feeds RSS de medios peruanos y las publica automá
 |---|---|
 | La República | `https://larepublica.pe/rss/home.xml` (incluye todas las secciones: deportes, economía, espectáculos, etc.) |
 | ATV | `https://www.atv.pe/rss/` |
+| Gestión | `https://gestion.pe/rss/` |
+| Canal N | `https://canaln.pe/feed` |
+| Willax | `https://willax.pe/feed` |
 
 Agregar una fuente nueva (si tiene RSS) es tan simple como añadir una línea al diccionario `FUENTES_RSS`.
 
 ## Estructura del proyecto
 
 ```
-├── scraper_news.py           # script principal
-├── obtener_chat_id.py            # script auxiliar de un solo uso (obtener el chat_id del canal)
+├── scraper_news.py               # script principal
+├── chat_id.py                    # script auxiliar de un solo uso (obtener el chat_id del canal)
 ├── crear_tabla_noticias.sql      # script SQL para crear la tabla en Supabase
 ├── requirements.txt              # dependencias
 ├── .env.example                  # plantilla de variables de entorno
