@@ -1,6 +1,12 @@
 # Scraper de Noticias → Telegram
 
+![Estado del scraper](https://github.com/augustocl20/informational-page-scraper/actions/workflows/scraper.yml/badge.svg)
+
 Bot que extrae noticias desde feeds RSS de medios peruanos y las publica automáticamente en un canal de Telegram, sin duplicados y sin intervención manual. Corre 24/7 gracias a GitHub Actions.
+
+## Capturas
+
+...
 
 ## Cómo funciona
 
@@ -32,7 +38,7 @@ Agregar una fuente nueva (si tiene RSS) es tan simple como añadir una línea al
 ## Estructura del proyecto
 
 ```
-├── scraper_noticias.py           # script principal
+├── scraper_news.py           # script principal
 ├── obtener_chat_id.py            # script auxiliar de un solo uso (obtener el chat_id del canal)
 ├── crear_tabla_noticias.sql      # script SQL para crear la tabla en Supabase
 ├── requirements.txt              # dependencias
@@ -49,7 +55,7 @@ python -m venv venv
 source venv/bin/activate  # en Windows: venv\Scripts\activate
 pip install -r requirements.txt
 cp .env.example .env  # y completa tus credenciales
-python scraper_noticias.py
+python scraper_news.py
 ```
 
 ## Variables de entorno
