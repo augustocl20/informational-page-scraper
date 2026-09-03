@@ -3,7 +3,7 @@ name: Scraper de noticias
 on:
   schedule:
     # Corre cada 30 minutos. La sintaxis es la de cron estándar (UTC).
-    - cron: "*/30 * * * *"
+    - cron: "7,37 * * * *"
   workflow_dispatch: {}  # permite correrlo manualmente desde la pestaña Actions
 
 jobs:
