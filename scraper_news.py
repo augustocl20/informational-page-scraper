@@ -33,6 +33,9 @@ TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 FUENTES_RSS = {
     "La República": "https://larepublica.pe/rss/home.xml",
     "ATV": "https://www.atv.pe/rss/",
+    "Gestión": "https://gestion.pe/rss/",
+    "Canal N": "https://canaln.pe/feed",
+    "Willax": "https://willax.pe/feed",
     # "RPP": "https://rpp.pe/rss",
 }
 
