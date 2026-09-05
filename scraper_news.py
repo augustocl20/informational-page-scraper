@@ -64,6 +64,73 @@ def limpiar_resumen(texto_html: str) -> str:
     return re.sub(r"\s+", " ", limpio).strip()
 
 
+def extraer_imagen(entrada) -> str | None:
+    """
+    Busca una imagen para la noticia probando, en orden, los distintos
+    formatos que usan los feeds RSS reales (no todos los medios exponen
+    la imagen de la misma forma):
+
+    1. media_content — extensión Media RSS que usa La República.
+    2. media_thumbnail — variante de Media RSS que usan otros medios.
+    3. enclosure de tipo imagen — patrón común en feeds de WordPress.
+    4. primera <img> dentro del HTML crudo del resumen — último recurso.
+
+    Devuelve None si no encuentra nada; en ese caso la noticia se envía
+    sin foto (mejor eso que fallar el envío completo).
+    """
+    if hasattr(entrada, "media_content") and entrada.media_content:
+        return entrada.media_content[0].get("url")
+
+    if hasattr(entrada, "media_thumbnail") and entrada.media_thumbnail:
+        return entrada.media_thumbnail[0].get("url")
+
+    for link in entrada.get("links", []):
+        if link.get("rel") == "enclosure" and link.get("type", "").startswith("image"):
+            return link.get("href")
+
+    html_crudo = entrada.get("summary", "")
+    if not html_crudo and entrada.get("content"):
+        html_crudo = entrada["content"][0].get("value", "")
+
+    match = re.search(r'<img[^>]+src="([^"]+)"', html_crudo)
+    if match:
+        return match.group(1)
+
+    return None
+
+
+def extraer_imagen_de_pagina(url_articulo: str) -> str | None:
+    """
+    Último recurso cuando el feed no trae ninguna imagen: visita la
+    página del artículo y busca la meta tag og:image, el estándar que
+    usan los sitios para la vista previa en redes sociales (Facebook,
+    WhatsApp, etc.) — casi todo medio de noticias moderno la tiene.
+
+    Cuesta una petición HTTP extra por noticia sin imagen, pero como
+    solo se llama para noticias NUEVAS (no para todo el feed en cada
+    corrida), el costo real es bajo.
+    """
+    try:
+        respuesta = requests.get(url_articulo, timeout=10)
+        respuesta.raise_for_status()
+    except requests.exceptions.RequestException:
+        return None
+
+    match = re.search(
+        r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']',
+        respuesta.text,
+    )
+    if match:
+        return match.group(1)
+
+    # Algunos sitios escriben los atributos en el orden inverso.
+    match = re.search(
+        r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:image["\']',
+        respuesta.text,
+    )
+    return match.group(1) if match else None
+
+
 def obtener_noticias(fuentes: dict) -> list[dict]:
     """
     Lee cada feed RSS y devuelve una lista de noticias normalizadas.
@@ -83,47 +150,34 @@ def obtener_noticias(fuentes: dict) -> list[dict]:
             continue
 
         if feed.bozo:
-            # bozo=True indica que el feed no se parseó del todo limpio
-            # (puede ser un detalle menor de formato, no siempre es fatal).
             print(f"⚠️  Aviso al leer {nombre_fuente}: {feed.bozo_exception}")
 
         for entrada in feed.entries:
-            # published_parsed viene como time.struct_time en UTC;
-            # lo convertimos a ISO 8601 para que Postgres lo entienda.
             fecha_iso = None
             if getattr(entrada, "published_parsed", None):
                 fecha_iso = datetime.fromtimestamp(
                     mktime(entrada.published_parsed), tz=timezone.utc
                 ).isoformat()
 
+            url_noticia = entrada.get("link", "")
+            imagen = extraer_imagen(entrada)
+            if not imagen and url_noticia:
+                imagen = extraer_imagen_de_pagina(url_noticia)
+
             noticias.append({
                 "fuente": nombre_fuente,
                 "titulo": entrada.get("title", "").strip(),
-                "url": entrada.get("link", ""),
+                "url": url_noticia,
                 "resumen": limpiar_resumen(entrada.get("summary", "")),
                 "categoria": entrada.get("category", ""),
                 "autor": entrada.get("author", ""),
                 "fecha_publicacion": fecha_iso,
-                "imagen_url": (
-                    entrada.media_content[0]["url"]
-                    if hasattr(entrada, "media_content") and entrada.media_content
-                    else None
-                ),
+                "imagen_url": imagen,
             })
     return noticias
 
 
 def guardar_noticias(supabase: Client, noticias: list[dict]) -> None:
-    """
-    Inserta las noticias nuevas en Supabase. Gracias al 'unique' en la
-    columna url, on_conflict + ignore_duplicates hace que las que ya
-    existen simplemente se salteen, sin lanzar error ni duplicarse.
-
-    Nota: NO usamos lo que devuelve upsert() para saber qué se insertó
-    de verdad — con ignore_duplicates=True esa respuesta no siempre es
-    confiable. En vez de eso, obtener_pendientes() pregunta directamente
-    a la tabla qué falta enviar.
-    """
     if not noticias:
         return
 
@@ -136,12 +190,6 @@ def guardar_noticias(supabase: Client, noticias: list[dict]) -> None:
 
 
 def obtener_pendientes(supabase: Client) -> list[dict]:
-    """
-    Devuelve las noticias que todavía no se enviaron a Telegram,
-    consultando directamente la columna enviado_telegram. Esto es lo
-    que realmente decide qué se envía — no importa si vienen de esta
-    corrida o de una anterior que se quedó a medias.
-    """
     try:
         resultado = (
             supabase.table("noticias")
@@ -157,19 +205,11 @@ def obtener_pendientes(supabase: Client) -> list[dict]:
 
 
 def enviar_a_telegram(token: str, chat_id: str, noticia: dict) -> None:
-    """
-    Envía una noticia al canal.
-
-    Si hay imagen: primero la foto con el título como caption, y en un
-    segundo mensaje el resumen + link. Si no hay imagen, todo va en un
-    solo mensaje de texto.
-    """
     titulo = html.escape(noticia["titulo"])
     resumen = html.escape(noticia["resumen"])
     cuerpo = f"{resumen}\n\n<a href=\"{noticia['url']}\">Leer más</a>"
 
     if noticia.get("imagen_url"):
-        # Mensaje 1: foto + título como caption
         respuesta = requests.post(
             f"https://api.telegram.org/bot{token}/sendPhoto",
             json={
@@ -182,9 +222,8 @@ def enviar_a_telegram(token: str, chat_id: str, noticia: dict) -> None:
         )
         respuesta.raise_for_status()
 
-        sleep(1)  # pequeño respiro entre los dos mensajes de la misma noticia
+        sleep(1)
 
-        # Mensaje 2: resumen + link
         respuesta = requests.post(
             f"https://api.telegram.org/bot{token}/sendMessage",
             json={
@@ -197,7 +236,6 @@ def enviar_a_telegram(token: str, chat_id: str, noticia: dict) -> None:
         )
         respuesta.raise_for_status()
     else:
-        # Sin imagen: todo junto en un solo mensaje
         texto = f"<b>{titulo}</b>\n\n{cuerpo}"
         respuesta = requests.post(
             f"https://api.telegram.org/bot{token}/sendMessage",
@@ -250,9 +288,6 @@ if __name__ == "__main__":
             marcar_como_enviada(supabase, n["id"])
             print(f"✅ Enviada: {n['titulo']}")
         except Exception as error:
-            # Ya se envió a Telegram pero no se pudo marcar en Supabase.
-            # Riesgo conocido: si esto pasa, esa noticia podría reenviarse
-            # en la próxima corrida (mejor eso que perderla silenciosamente).
             print(f"⚠️  Se envió '{n['titulo']}' pero no se pudo marcar en Supabase: {error}")
 
-        sleep(2)  # evita saturar el rate limit de Telegram en el canal
+        sleep(2)
